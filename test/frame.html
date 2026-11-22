@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Isolated application test</title><div id="root"></div>
+<script type="module">
+const fixture=parent.campusTest;
+if(!fixture)throw new Error('Open the browser review fixture.');
+history.replaceState(null,'',fixture.path+'?basemap=offline');
+for(const key of ['localStorage','sessionStorage'])Object.defineProperty(window,key,{value:fixture[key]});
+const RealDate=Date,started=fixture.started,epoch=RealDate.parse('2026-11-21T16:30:00Z');
+window.Date=class extends RealDate{
+  constructor(...args){super(...(args.length?args:[epoch+RealDate.now()-started]));}
+  static now(){return epoch+RealDate.now()-started;}
+};
+const sample=()=>({coords:{latitude:19.1307799,longitude:72.9172854,accuracy:8},timestamp:Date.now()});
+Object.defineProperty(navigator,'geolocation',{value:{
+  getCurrentPosition(success){setTimeout(()=>success(sample()),10);},
+  watchPosition(success){setTimeout(()=>success(sample()),10);return 1;},clearWatch(){}
+}});
+const originalError=console.error.bind(console);
+console.error=(...args)=>{fixture.errors.push(location.pathname+' '+args.map(String).join(' '));originalError(...args);};
+window.addEventListener('unhandledrejection',e=>fixture.errors.push(location.pathname+' '+String(e.reason)));
+window.addEventListener('error',e=>{if(e.message)fixture.errors.push(location.pathname+' '+(e.error?.stack||e.message));});
+const html=new DOMParser().parseFromString(await (await fetch('/index.html')).text(),'text/html');
+for(const link of html.querySelectorAll('link[rel=stylesheet]'))document.head.append(link.cloneNode(true));
+for(const script of html.querySelectorAll('script[type=module][src]'))await import(script.getAttribute('src'));
+</script></html>

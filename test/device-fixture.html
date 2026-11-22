@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>CampusWatch device QA fixture</title>
+<style>body{margin:0;background:#233744;color:white;font:14px system-ui}header{padding:6px 10px}button{margin:3px}iframe{width:390px;height:844px;border:0;background:white;display:block;max-width:100%}</style>
+<header>Isolated mobile test · synthetic GPS input · no hardware access
+<button>Desktop width</button><button>Phone width</button><button>Allow test fix</button><button>Deny test fix</button><button>Timeout</button><button>Unavailable</button><button>Poor accuracy</button><button>Reach library</button><button>Deviate</button><output aria-live="polite">Waiting</output></header>
+<iframe title="390 pixel CampusWatch test" src="/routes?basemap=offline" sandbox="allow-same-origin allow-scripts allow-forms allow-downloads" allow="geolocation 'none'"></iframe>
+<script>
+const frame=document.querySelector('iframe'), status=document.querySelector('output');
+let one,watch,nextId=0;
+frame.onload=()=>{
+  one=watch=null;
+  const key=k=>'cw-isolated-qa:'+k;
+  Object.defineProperty(frame.contentWindow,'localStorage',{configurable:true,value:{
+    getItem:k=>sessionStorage.getItem(key(k)),setItem:(k,v)=>sessionStorage.setItem(key(k),v)
+  }});
+  Object.defineProperty(frame.contentWindow.navigator,'geolocation',{configurable:true,value:{
+    getCurrentPosition(ok,fail){one={ok,fail};status.value='Single fix requested';},
+    watchPosition(ok,fail){watch={ok,fail};status.value='Watching';return ++nextId;},
+    clearWatch(){watch=null;status.value='Watch cleared';}
+  }});
+};
+document.querySelector('header').onclick=e=>{
+  if(e.target.tagName!=='BUTTON')return;
+  const action=e.target.textContent;
+  if(action==='Desktop width'||action==='Phone width'){
+    frame.style.width=action==='Desktop width'?'1250px':'390px';return;
+  }
+  const receiver=one||watch;
+  if(!receiver){status.value='No pending request';return;}
+  const code={'Deny test fix':1,'Unavailable':2,'Timeout':3}[action];
+  if(code)receiver.fail({code});
+  else {
+    const coords=action==='Reach library'?[19.1337915,72.9150281]:action==='Deviate'?[19.1314705,72.9131908]:[19.1307799,72.9172854];
+    receiver.ok({coords:{latitude:coords[0],longitude:coords[1],accuracy:action==='Poor accuracy'?140:8},timestamp:Date.now()});
+  }
+  one=null;status.value='Sent '+action;
+};
+</script></html>

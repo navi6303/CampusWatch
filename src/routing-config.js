@@ -1,0 +1,20 @@
+export const routingWeights = {
+  lakeside: .8,
+  distance: .30,
+  footpath: {Dedicated:0, 'Mapped sidewalk':.08, 'Shared path':.24, 'Sidewalk unknown':.46, 'No sidewalk tagged':.69},
+  roughSurface: .15,
+  crossing: {'Signal-controlled':10, Marked:17, Unmarked:36, 'Control unknown':30, 'Possible road junction':22},
+  lighting: {dayUnknown:.05, nightUnknown:.32, nightUnlit:.76},
+  hazard: {Low:.14,Moderate:.28,High:.55,Critical:1.2},
+  reportedFactor: .55,
+  accidentHotspot: .55,
+  wildlifeZone: .30,
+  maxSnapMeters: 85,
+  hazardRadius: 30,
+  accidentRadius: 65,
+  minimumAccidents: 3,
+  walkingMetersPerMinute: 74,
+  scoreScale: 850,
+  alternativeDetour: 1.65,
+  alternativeOverlap: .92
+};

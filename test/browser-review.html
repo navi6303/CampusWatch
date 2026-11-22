@@ -1,0 +1,131 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CampusWatch browser regression checks</title>
+<style>body{font:15px system-ui;color:#123;margin:16px;background:#f4f8fa}button{padding:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere}iframe{display:block;border:0;box-shadow:0 0 0 1px #aaa;background:white}</style>
+<h1>CampusWatch browser regression checks</h1><p>Runs the production application with isolated demo storage, local vectors and simulated location fixes.</p>
+<button id="run">Run checks</button><strong id="result" role="status"> Ready</strong><pre id="log"></pre>
+<iframe title="CampusWatch test viewport" sandbox="allow-same-origin allow-scripts allow-forms" allow="geolocation 'none'"></iframe>
+<script type="module">
+const frame=document.querySelector('iframe'),result=document.querySelector('#result'),log=document.querySelector('#log');
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const store=()=>{const values=new Map();return {getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)};};
+const fixture=window.campusTest={localStorage:store(),sessionStorage:store(),path:'/',errors:[],started:Date.now()};
+const doc=()=>frame.contentDocument;
+const all=selector=>[...doc().querySelectorAll(selector)];
+const body=()=>doc().body?.innerText||'';
+const until=async(check,label)=>{for(let i=0;i<160;i++){const value=check();if(value)return value;await pause(35);}throw new Error(label);};
+const expectText=text=>until(()=>body().includes(text),'Missing text: '+text);
+const byName=(role,name)=>all(role==='button'?'button,[role="button"]':role).find(e=>(e.getAttribute('aria-label')||e.textContent.trim())===name);
+const button=async name=>{const b=await until(()=>byName('button',name),'Missing button: '+name);if(b.disabled)throw new Error('Disabled: '+name);b.click();await pause(70);};
+const set=(el,value)=>{
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value').set.call(el,value);
+  el.dispatchEvent(new frame.contentWindow.Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));
+};
+async function open(path,width,height){
+  fixture.path=path;frame.style.width=width+'px';frame.style.height=height+'px';
+  await new Promise(resolve=>{frame.onload=resolve;frame.src='/test/frame.html?v='+Math.random();});
+  await until(()=>doc().querySelector('main h1'),'App page did not load: '+path);
+}
+async function nav(name){
+  const menu=byName('button','Menu');
+  if(menu&&menu.getBoundingClientRect().width)await button('Menu');
+  await button(name);
+}
+async function place(label,value){
+  const input=doc().querySelector('input[aria-label="'+label+'"]');input.focus();set(input,value);
+  await until(()=>input.value===value,'Place query: '+value);
+  const choice=await until(()=>all('.place-results button').find(e=>e.firstChild.textContent===value),'Place: '+value);
+  choice.click();await pause(45);
+}
+function assert(ok,msg){if(!ok)throw new Error(msg);}
+function layout(label){
+  const root=doc().documentElement;
+  assert(root.scrollWidth<=root.clientWidth+1,label+' overflows '+root.scrollWidth+'/'+root.clientWidth);
+}
+function note(s){log.textContent+=s+'\n';}
+async function walk(width,height,dest,stops){
+  await open('/',width,height);await expectText('Campus safety map');layout('Landing map');
+  assert(!doc().querySelector('header .tag') && !all('button').some(b=>/^(sign in|sign out|log in|log out)$/i.test(b.textContent.trim())),'Unexpected account UI');
+  await nav('Safe Walking Routes');await place('Starting location','Lecture Hall Complex 3');
+  for(const [i,name] of stops.entries()){await button('Add intermediate stop');await place('Stop '+(i+1),name);}
+  await place('Destination',dest);await button('Find walking routes');
+  await expectText('Route comparison');layout('Planner');
+  const count=stops.length+1;
+  function geometry(){
+    const paths=all('path.walking-leg'),markers=all('.journey-stop');
+    const box=doc().querySelector('.map').getBoundingClientRect();
+    assert(box.width>=250&&box.height>=210,'Map collapsed to '+box.width+' × '+box.height);
+    assert(markers.every(e=>{const r=e.getBoundingClientRect();return r.left>=box.left-1&&r.right<=box.right+1&&r.top>=box.top-1&&r.bottom<=box.bottom+1;}),'Stop marker outside whole-route view');
+    assert(paths.length===count,'Expected '+count+' displayed legs, saw '+paths.length);
+    assert(markers.length===count+1,'Missing stop marker');
+    for(let i=0;i<paths.length;i++){
+      const p=paths[i],len=p.getTotalLength();assert(len>0,'Empty displayed leg '+i);
+      if(i){const a=paths[i-1].getPointAtLength(paths[i-1].getTotalLength()),b=p.getPointAtLength(0);assert(Math.hypot(a.x-b.x,a.y-b.y)<1.6,'Gap between displayed legs');}
+    }
+    assert(all('.leg-panel li').length===count,'Incomplete leg list');
+  }
+  geometry();const summary=doc().querySelector('.journey-total').textContent;
+  doc().querySelector('.route-card.shortest').click();await pause(100);geometry();
+  if(stops.length){all('.leg-panel li button')[1].click();await expectText('Show whole route');await button('Show whole route');}
+  const displayedPath=doc().querySelector('path.walking-leg');
+  const motion=frame.contentWindow.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const animation=frame.contentWindow.getComputedStyle(displayedPath);
+  if(motion)assert(parseFloat(animation.animationDuration)<.01,'Route motion still active');
+  else assert(animation.animationName==='show-walk','Route draw transition missing');
+  await button('Collapse route details');assert(!doc().querySelector('.leg-panel'),'Details did not collapse');await button('Expand route details');
+  assert(doc().querySelector('path.walking-leg')===displayedPath,'Toggling details rebuilt the map line');
+  if(dest==='Hostel 9 A')await expectText('nearest reachable path');
+  await button('Start Navigation');await expectText('Walking instructions');await button('Enable live GPS');
+  await until(()=>doc().querySelector('.gps-position'),'Missing simulated GPS marker');await button('End Navigation');
+  await nav('Campus map');await expectText('Campus safety map');layout('Incident map');
+  const category=doc().querySelector('select[aria-label=Category]');set(category,'Leopard sighting');await pause(65);
+  const leopard=await until(()=>all('.report-pin').find(e=>e.getAttribute('aria-label')?.includes('Leopard sighting')),'Missing leopard marker');
+  leopard.click();await expectText('Synthetic / Demo Data');layout('Map popup');await button('Close popup');
+  await button('Heatmap');assert(!all('.leaflet-heatmap-layer').length,'Protected records in density layer');
+  set(category,'Broken streetlight');await until(()=>doc().querySelector('.leaflet-heatmap-layer'),'Missing infrastructure heatmap');
+  await nav('Wildlife');await expectText('Historical observations');layout('Wildlife');
+  await nav('Safety alerts');await expectText('Announcement archive');layout('Alerts');
+  note(width+' × '+height+' PASS · '+count+' displayed leg(s) for both objectives · '+summary+' · map, GPS, popup, heatmap, wildlife and alerts');
+}
+async function workspaces(){
+  await open('/my-reports',390,844);await expectText('You have no submitted reports.');
+  await nav('Report incident');await expectText('Report an incident');layout('Student form');
+  set(doc().querySelector('select[name=category]'),'Broken streetlight');set(doc().querySelector('textarea[name=description]'),'Isolated browser regression lamp');
+  await button('Use GPS');await expectText('19.13078');await button('Submit report');await expectText('Report submitted for review');
+  await nav('My reports');await expectText('Isolated browser regression lamp');await expectText('Submitted');
+  await nav('Administration');await expectText('Complaint queue');layout('Admin dashboard');
+  set(doc().querySelector('input[aria-label="Search complaint queue"]'),'Broken streetlight');await pause(60);
+  const row=await until(()=>all('.recent .report-row').find(e=>e.textContent.includes('Broken streetlight')&&e.textContent.includes('21 Nov 2026')&&e.textContent.includes('Simulated')),'Admin queue row');
+  row.click();await expectText('Isolated browser regression lamp');
+  set(doc().querySelector('select[aria-label=Verification]'),'Verified');set(doc().querySelector('select[aria-label=Status]'),'Resolved');await button('Save changes');
+  await expectText('Complaint updated');await button('History');await expectText('Resolved');
+  const title=doc().querySelector('input[name=title]');set(title,'Walkway advisory');set(doc().querySelector('textarea[name=body]'),'Isolated demo advisory.');
+  doc().querySelector('.fields input[type=checkbox]').click();await button('Publish simulated announcement');await nav('Safety alerts');await expectText('Walkway advisory');
+  await nav('My reports');await expectText('Isolated browser regression lamp');await expectText('Resolved');
+  assert(all('.own-reports article').length===1,'Student history contains another reporter');
+  await open('/my-reports',390,844);await expectText('Resolved');
+  await nav('Campus map');await expectText('Campus safety map');
+  note('Workspaces PASS · direct reporting, persistent owner history, administration, resolution and published alert');
+}
+document.querySelector('#run').onclick=async()=>{
+  const start=document.querySelector('#run');start.disabled=true;result.textContent='Running';log.textContent='';
+  fixture.localStorage=store();fixture.sessionStorage=store();fixture.errors=[];fixture.started=Date.now();
+  try{
+    await walk(360,800,'Central Library',[]);
+    await walk(390,844,'Hostel 7',['Central Library','Hostel 9 A']);
+    await walk(430,932,'Hostel 9 A',[]);
+    await walk(768,1024,'Hostel 7',['Central Library','Hostel 6 B','Lecture Hall Complex 3']);
+    await walk(1280,900,'Hostel 7',['Central Library','Hostel 9 A']);
+    await open('/routes',390,844);await place('Starting location','Lecture Hall Complex 3');await place('Destination','Central Library');await button('Find walking routes');
+    const before=doc().querySelector('.map').clientWidth;
+    frame.style.width='844px';frame.style.height='390px';await pause(300);layout('Landscape');
+    assert(doc().querySelector('.map').clientWidth>before,'Map width did not change on rotation');
+    await until(()=>{
+      const mapBox=doc().querySelector('.map').getBoundingClientRect();
+      return all('.journey-stop').every(e=>{const r=e.getBoundingClientRect();return r.x>=mapBox.left&&r.right<=mapBox.right+1&&r.y>=mapBox.top&&r.bottom<=mapBox.bottom+1;});
+    },'Stops left map after rotation');
+    note('Orientation PASS · 390 × 844 to 844 × 390 · both route endpoints remain inside the resized map');
+    await workspaces();
+    assert(!fixture.errors.length,fixture.errors.join('; '));result.textContent='PASS';
+  }catch(e){result.textContent='FAIL';note(e.message);note(body().slice(-680));}
+  finally{start.disabled=false;}
+};
+</script></html>

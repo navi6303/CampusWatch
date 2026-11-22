@@ -1,0 +1,35 @@
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/map",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/report",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/my-reports",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/wildlife",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/alerts",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/routes",
+      "destination": "/index.html"
+    }
+  ]
+}
